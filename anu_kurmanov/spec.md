@@ -25,7 +25,8 @@ some other plausible reading of the original problem gives a different result.
 - File: `top_words.py`. Function: `top_words`.
 - Signature: `def top_words(text: str) -> list[tuple[str, int]]:`
 - The function is pure: it does not read files, print, use the network, or keep
-  state between calls. The same input always gives the same output.
+  state between calls. The same input always gives the same output on the same
+  interpreter (the same Unicode database, see the next bullet).
 - The result is a `list` of at most 10 `tuple`s. Each tuple is `(word, count)`,
   where `word` is a `str` and `count` is an `int` of at least 1.
 - If `text` is not a `str` (for example `None`, `bytes`, or a list), the
@@ -35,6 +36,10 @@ some other plausible reading of the original problem gives a different result.
   never used. The returned words are always plain `str` objects. For example,
   given `class Shout(str): lower = str.upper`, `top_words(Shout("Hi hi"))`
   returns `[("hi", 2)]`, and `type(top_words(Shout("Hi"))[0][0]) is str`.
+  Overriding `__str__` has no effect either: given
+  `class W(str): __str__ = lambda self: "zzz"`, `top_words(W("Hi hi"))` returns
+  `[("hi", 2)]`, while an implementation that called `str(text)` would wrongly
+  return `[("zzz", 1)]`.
 
 | Input                        | Expected output                           |
 | ---------------------------- | ----------------------------------------- |
@@ -70,7 +75,7 @@ row, `й` is written once precomposed (U+0439) and once as `и` + combining brev
 (U+0438 U+0306). Without normalization each row would give two different
 words.
 
-No other folding happens: `ё` and `е` are different letters, and so are Kazakh
+Apart from lowercasing (section 3), no other folding happens: `ё` and `е` are different letters, and so are Kazakh
 letters and the Russian letters they look like (`қ` and `к`, `ү` and `у`, `і`
 and `и`, `ә` and `а`, `ө` and `о`, `ғ` and `г`, `ұ` and `у`, `ң` and `н`, `һ`
 and `х`). Accents are not removed (`café` stays `café`). Nothing is
@@ -229,8 +234,8 @@ break hyphenation is not undone: the last row is two words.
 ### 4.4 Apostrophes
 
 An apostrophe with a letter or mark of the same word before it and a letter
-after it is part of the word, and a word may contain several apostrophes. Leading and trailing
-apostrophes, and apostrophes used as quotation marks, are separators.
+after it is part of the word, and a word may contain several apostrophes.
+Leading and trailing apostrophes, and apostrophes used as quotation marks, are separators.
 
 | Input                                 | Expected output                                   |
 | ------------------------------------- | ------------------------------------------------- |
@@ -240,6 +245,12 @@ apostrophes, and apostrophes used as quotation marks, are separators.
 | `"the dogs' bowl"`                    | `[("bowl", 1), ("dogs", 1), ("the", 1)]`          |
 | `"it's it is"`                        | `[("is", 1), ("it", 1), ("it's", 1)]`             |
 | `"O'Brien o'brien"`                   | `[("o'brien", 2)]`                                |
+| `"don\u2018t"`                        | `[("don", 1), ("t", 1)]`                          |
+| `"don\u0060t"`                        | `[("don", 1), ("t", 1)]`                          |
+
+The last two rows use the left single quotation mark `‘` (U+2018) and the
+backtick (U+0060). They look like apostrophes but are not joiners, so they
+split the word.
 
 The 2017 Kazakh Latin alphabet wrote some letters with an apostrophe (for
 example `s'` for `ш`). These spellings get no special handling: a word-final
@@ -335,7 +346,7 @@ text does not matter.
 | Input                          | Expected output                                   |
 | ------------------------------ | ------------------------------------------------- |
 | `"zebra apple mango"`          | `[("apple", 1), ("mango", 1), ("zebra", 1)]`      |
-| `"яблоко apple"`               | `[("apple", 1), ("яблоко", 1)]`                   |
+| `"zoo \u00e4"`                  | `[("zoo", 1), ("\u00e4", 1)]`                     |
 | `"ұл ул үй уй"`                | `[("уй", 1), ("ул", 1), ("үй", 1), ("ұл", 1)]`    |
 | `"ёж жук"`                     | `[("жук", 1), ("ёж", 1)]`                         |
 | `"\u1ea1 \u0431"`               | `[("\u0431", 1), ("\u1ea1", 1)]`                  |
@@ -347,8 +358,8 @@ order is different (`у`, `ұ`, `ү`), so a collation-based sort would put `ұл
 before `үй`. Within the `у` words, `й` (U+0439) comes before `л` (U+043B). In
 the fourth row, `ж` is U+0436 and `ё` is U+0451, so `жук` comes first, while
 Russian alphabetical order (`е`, `ё`, `ж`) would put `ёж` first. In the second
-row, a typical collation also puts Latin first; the row shows that order of
-appearance does not matter. The fifth row is `ạ б`: `ạ` (U+1EA1) sorts after
+row (`zoo ä`), `ä` is U+00E4, which sorts after `z` (U+007A); a collation-based
+sort would put `ä` first, next to `a`. The fifth row is `ạ б`: `ạ` (U+1EA1) sorts after
 `б` (U+0431).
 
 ## 7. The limit of 10
@@ -362,11 +373,13 @@ distinct words and several of them tie at the 10th place, the order from section
 | --------------------------------------------------------- | --------------- |
 | `"a b c d e f g h i j k l"`                               | `[("a", 1), ("b", 1), ("c", 1), ("d", 1), ("e", 1), ("f", 1), ("g", 1), ("h", 1), ("i", 1), ("j", 1)]` |
 | `"l l k j i h g f e d c b a"`                             | `[("l", 2), ("a", 1), ("b", 1), ("c", 1), ("d", 1), ("e", 1), ("f", 1), ("g", 1), ("h", 1), ("i", 1)]` |
-| `"one two three"`                                         | `[("one", 1), ("three", 1), ("two", 1)]` |
+| `"k k j j a b c d e f g h i"`                             | `[("j", 2), ("k", 2), ("a", 1), ("b", 1), ("c", 1), ("d", 1), ("e", 1), ("f", 1), ("g", 1), ("h", 1)]` |
 
 In the first row, `k` and `l` tie with the others at count 1 but are cut because
 they sort last. In the second row, `l` appears last in the text but has the
-highest count, so it is first; `j` and `k` are cut.
+highest count, so it is first; `j` and `k` are cut. In the third row, `j` and
+`k` come first because of their count, even though `a` sorts before them; of the
+nine words with count 1, `i` sorts last and is cut.
 
 ## 8. Out of scope
 
